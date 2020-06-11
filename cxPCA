@@ -1,0 +1,404 @@
+##################################################################################################################
+##Core tool data: #PCA dimensions reduction
+#*****************************************************************************************
+
+#PURPOSE: 
+#This script runs a PCA on a subset of the East African data (stone cores)) to explore relationship in tool shape and technological attributes & reduce variables for modelling patterning and relationships with other technological components
+#Some minor data manipulation if followed by checking of distriubtions and subsequent transformations
+#Additional assumptions are checked and a Robust PCA conducted
+#Results are plotted as biplots (and show very clear differences between regions)
+#European 'outgroup' is projected onto PCA space to see test if East African region forms a distinct group 
+
+#################################################################################################################
+#READ IN DATA : cores (all and imputed) db
+#NOTE: data already cleaned and missing values imputed using MICE
+
+library(RCurl)
+cores= read.csv(getURL("https://raw.github.com/alimantymelv/msa-tech-var/cai.csv"))
+
+#################################################################################################################
+#Some minor data manipulation
+
+#Rename variable
+cores =  dplyr::rename(cores, basin=region, region=lat3)
+
+#Rename variable categories
+cores$region = dplyr::recode(cores$region, "Equatorial"= "C.Kenyan_Rift",
+                             "Equatorial-West"="Lake_Vic_Basin", 
+                             "North" = "Ethiop_Rift", "Outgroup"="Europe_OutGrp")
+
+
+#################################################################################################################
+#SELECT VARIABLES OF INTEREST FOR PCA
+#(relate to shape and technological attributes of stone tools)
+cdb <- subset(cores, 
+              select=c(site, weight, orient2, 
+                       epa, platfacets, scardir, totscar,
+                       elong, flatstn, 
+                       scarelong, cort)) 
+
+#Manipulate cortex variable into binominal/dummy variable
+cdb$cort <- if_else(cdb$cort==0, 0, 1) 
+
+#################################################################################################################
+#CHECK DISTRIBUTIONS/SKEW FOR PCA
+library(cowplot); library(ggplot2)
+library(purrr)
+
+#AUTOMATE EXPLORATORY PLOTTING FUNCTIONS
+response = names(cdb)[1:10]
+response = set_names(response)
+
+#histogram functions
+hist_fun = function(x) {
+  ggplot(cdb, aes(x = .data[[x]]) ) +
+    geom_histogram() +
+   theme_bw() +
+    labs(x = x)
+}
+
+#Plots histograms
+all_hist = map(response, hist_fun)
+plot_grid(plotlist = all_hist)
+
+#Plots histograms
+all_hist = map(response, hist_fun)
+plot_grid(plotlist = all_hist)
+
+##Normal QQ functions
+nqq_fun = function(x) {
+  ggplot(cdb, aes(sample = .data[[x]]) ) +
+    stat_qq() +
+    theme_bw() +
+    labs(x = x)
+}
+
+#Plots QQplot
+all_nqq = map(response, nqq_fun)
+cowplot::plot_grid(plotlist = all_nqq)
+
+#################################################################################################################
+#TRANSFORM CONTINUOUS VARIABLES TO REDUCE SKEW
+library(MASS); library(car)
+
+bc <- boxcox(weight ~ 1, data=cdb) 
+range(bc$x[bc$y > max(bc$y) - qchisq(0.95, 1) / 2])
+lambda <- bc$x[which.max(bc$y)]; lambda #Close to 0
+x <- bcPower(cdb$weight, 0)
+qqnorm(x)
+hist(x) #reduces skew
+cdb$weightt <- bcPower(cdb$weight, 0)
+rm(bc, lambda, x)
+
+bc <- boxcox(elong ~ 1, data=cdb) #0.5
+range(bc$x[bc$y > max(bc$y) - qchisq(0.95, 1) / 2])
+lambda <- bc$x[which.max(bc$y)];lambda # Spans -0.5
+x <- bcPower(cdb$elong, -0.5)
+qqnorm(x)
+hist(x) #reduces skew
+cdb$elongt <- bcPower(cdb$elong, -0.5)
+rm(bc,lambda, x)
+
+bc <- boxcox(flatstn ~ 1, data=cdb) #spans 0
+range(bc$x[bc$y > max(bc$y) - qchisq(0.95, 1) / 2])
+lambda <- bc$x[which.max(bc$y)]; lambda
+x  <- bcPower(cdb$flatstn, 0)
+qqnorm(x)
+hist(x) #reduces skew
+cdb$flatstnt <- bcPower(cdb$flatstn, 0)
+rm(bc, lambda, x)
+
+bc <- boxcox(scarelong ~ 1, data=cdb)  
+range(bc$x[bc$y > max(bc$y) - qchisq(0.95, 1) / 2])
+lambda <- bc$x[which.max(bc$y)]; lambda # spans 0
+x <- bcPower(cdb$scarelong, 0)
+qqnorm(x)
+hist(x) #reduces skew
+cdb$scarelongt  <- bcPower(cdb$scarelong, 0)
+rm(bc,lambda, x)
+
+bc <- boxcox(epa ~ 1, data=cdb) #
+range(bc$x[bc$y > max(bc$y) - qchisq(0.95, 1) / 2])
+lambda <- bc$x[which.max(bc$y)]; lambda
+x <- bcPower(cdb$epa, 2)
+qqnorm(x)
+hist(x) #transform tails, but small improvement
+cdb$epat <- bcPower(cdb$epa, 2)
+rm(bc, lambda, x)
+
+#################################################################################################################
+#Extract European outgroup (for later projection)
+library(tidyverse) 
+cout = subset(cdb, site=="Konigsaue", select=c(weightt, orient2, 
+                                                 epat, platfacets, scardir, totscar,
+                                                 elongt, flatstnt, 
+                                                 scarelongt, cort))
+
+#Remove Euro from African Dataset and keep transformed vars
+cdb = subset(cdb, site!="Konigsaue", select=c(weightt, orient2, 
+                                                  epat, platfacets, scardir, totscar,
+                                                  elongt, flatstnt, 
+                                                  scarelongt, cort))
+
+#################################################################################################################
+#CHECK OTHER ASSUMPTIONS FOR PCA
+library(Hmisc); library(psych);
+library(corrplot); 
+
+#AUTOMATE exploratory plots to check correlation among variables
+expl = names(cdb)[1:10]
+expl = set_names(expl)
+
+#scatter functions
+scatter_fun = function(x, y) {
+  ggplot(cdb, aes(x = .data[[x]], y = .data[[y]]) ) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE, color = "grey74") +
+    theme_bw() +
+    labs(x = x,
+         y = y)
+}
+
+#Check function
+scatter_fun("weightt", "epa")
+
+#Run funciton for all combination of variables
+all_plots = map(response,
+                ~map(expl, scatter_fun, y = .x) )
+
+#View plots by variable
+all_plots$weightt[2:4]
+cowplot::plot_grid(plotlist = all_plots$weightt)
+
+#Check data structure
+glimpse(cdb)
+
+#Check no missing values
+sapply(cdb, function(x) sum(is.na(x)))
+
+#Check correlation amoung variables
+rcorr(as.matrix(cdb), type="pearson")
+fcor = cor(cdb)
+
+#Barletts sphericity test: If signif PCA can perform efficiently
+bar.test = cortest.bartlett(fcor, n=3033); bar.test
+
+#KMO index  If >1, the PCA can act efficiently;
+KMO(fcor) #relatively low 0.69, but adequate nature of data (expect high and relatively unstructured variability)
+
+#Test positivity of correlation matrix
+det(fcor)
+
+
+#################################################################################################################
+#PARALLEL ANALYSIS TO Determine # of components
+
+fa.parallel(cdb, fm = 'pa', fa = 'pc',	n.iter = 1000,
+            cor="cor", quant = .95, SMC=TRUE); #prints scree plot
+#Alt that prints eigenvalues
+library(paran)
+paran(cdb, iterations=1000, centile =95) #3 components.
+
+#Outlier map/disganostic plot for robust #34=plrestrict
+plot(PcaHubert(cdb, k=3), sub="fait, k=3") 
+
+
+#################################################################################################################
+#RUN PCA
+#Use Robust PCA as data still has outliers (resistent to outliers, not skew)*******************
+library(rrcov)
+#**
+npc <- 3 #3 (number of PCs to keep)
+set.seed(2019)
+#Data scaled in PCA function. 
+robc<- PcaHubert(cdb, k = 10, alpha =0.85, scale=TRUE); #alpha = 1-alpha = the fraction of outliers the algorithm should resist
+
+#View results
+summary(robc) #3pc = 57% explained var
+plot(robc) #PCA diagnostic plot (or outlier map)
+screeplot(robc, type="line") 
+round(robc@eigenvalues, 2) #eigenvalues=inertia/% of explained variance 
+round(robc@loadings, 2) #loadings=variable contrib/eigenvectors, scores=coords
+corrplot(robc@loadings[,1:npc], is.corr=FALSE) 
+biplot(robc)
+
+#Varimax rotation on dimensions to keep (to improve interpretation)
+eigsd <- sqrt(robc@eigenvalues) #standard deviations of PCs = sqrts of eigenvalues of covariance/correlation matrix). 
+rawload.robc <- robc@loadings[,1:npc] %*% diag(eigsd, npc, npc) #raw loadings
+vmxload.robc <- varimax(rawload.robc)$loadings #varimax rotated loadings
+vmxload.robc #explained 53% after rotation
+corrplot(vmxload.robc, is.corr=FALSE) #view rotated loadings
+
+#Export table of loadings
+library(stargazer)
+cloadings <- data.frame(var=rownames(unclass(vmxload.robc)), vmxload.robc[,1:npc])
+colnames(cloadings) <- c("var", "RC1", "RC2", "RC3")
+#Flip sign so > values=larger cores / more scars/ more elongate
+cloadings$RC1 <- (cloadings$RC1)*-1 
+cloadings$RC2 <- (cloadings$RC2)*-1 
+cloadings$RC3 <- (cloadings$RC3)*-1 
+#Tidy names of variables
+cloadings$var <- dplyr::recode(cloadings$var, "scardir"="No. flaking directions", "totscart"="No. scars >5mm",
+                               "elongt"="Elongation",  "flatt"="Flattening", 
+                               "platfacets"="No. platform facets", "epat"="EPA", 
+                               "scarelongt"="Scar elongation",
+                               "orient2"="Core orientation",  "weightt"="Weight", "cort"="Cortical")
+#Export table
+stargazer(cloadings, type="text", summary=FALSE, title="Rotated component loadings: Flakes", 
+          out="cload.html")
+write.csv(vmxload.robc, "cload.csv", row.names = FALSE)
+
+#Rotate scores = multiply data with the transposed pseudo-inverse of the rotated loadings
+invLoadings <- t(pracma::pinv(vmxload.robc))
+vscores.c <- as.data.frame(scale(cdb) %*% invLoadings) #rotated scores
+colnames(vscores.c) <- c("RC1", "RC2", "RC3") #RC= rotated component
+#Invert scores as for loadings above so > values = > cores
+vscores.c$RC1 <- (vscores.c$RC1)*-1 
+vscores.c$RC2 <- (vscores.c$RC2)*-1 
+vscores.c$RC3 <- (vscores.c$RC3)*-1 
+#tidy workspace
+rm(rawload.robc, invLoadings, eigsd, npc) 
+
+
+#################################################################################################################
+##Plot results********************************************************
+#All points 
+library(ggbiplot)
+#Need to convert to prcomp object for ggbiplot
+#Create prcomp object (non-robust PCA method)
+prc.c = prcomp(cdb, center=TRUE, scale=TRUE)
+summary(prc.c)
+
+#Swap out VARIMAX ROTATED scores and loadings for robust PCA data into prcomp object for plotting
+prc.c$x = vscores.c %>% subset(select=c(RC1:RC3))
+prc.c$x = prc.c$x*-1 #invert scores as above
+prc.c$rotation = vmxload.robc #%>% subset(select=c(RC1:RC3))
+prc.c$rotation = (prc.c$rotation[1:10, 1:3])*-1 #invert scores as above
+prc.c$sdev<-robc@sd
+prc.c$center<-robc@center
+prc.c$scale<-robc@scale
+
+#RC 1 and 2
+library(viridis)
+#PLOT by time periods
+mis12 = ggbiplot(prc.c,
+                 obs.scale = 1, var.scale = 1,
+                 ellipse = TRUE, circle = TRUE,
+                 varname.size = 4,
+                 groups=cores$mis2,
+                 alpha=0.5) + #help with overplotting
+  scale_color_viridis(discrete=TRUE) +
+  scale_x_continuous(name = "PC1 (25.4% explained var.)") +
+  scale_y_continuous(name="PC2 (17.6% explained var.)") +
+  ggtitle(label="PCA of core tools data by Marine Isotope Stage (MIS)") +
+  theme_minimal() + 
+  theme(legend.direction = "horizontal", legend.position = "bottom",
+        legend.title = element_blank())
+
+#RC 1 & 3
+mis13 = ggbiplot(prc.c, choices = c(1,3),
+                 obs.scale = 1, var.scale = 1,
+                 ellipse = TRUE, circle = TRUE,
+                 varname.size = 4,
+                 groups=cores$mis2,
+                 alpha=0.5) +
+  scale_color_viridis(discrete=TRUE) +
+  scale_x_continuous(name = "PC1 (25.4% explained var.)") +
+  scale_y_continuous(name="PC3 (13.2% explained var.)") +
+  ggtitle(label="PCA of core tools data by Marine Isotope Stage (MIS)") +
+  theme_minimal() + 
+  theme(legend.direction = "horizontal", legend.position = "bottom",
+        legend.title = element_blank())
+
+#PLOT by regional groupings
+reg12 = ggbiplot(prc.c,
+                 obs.scale = 1, var.scale = 1,
+                 ellipse = TRUE, circle = TRUE,
+                 varname.size = 4,
+                 groups=cores$region,
+                 alpha=0.5) + #help with overplotting
+  scale_color_viridis(discrete=TRUE) +
+  scale_x_continuous(name = "PC1 (25.4% explained var.)") +
+  scale_y_continuous(name="PC2 (17.6% explained var.)") +
+  ggtitle(label="PCA of core tools data by East African Region") +
+  theme_minimal() + 
+  theme(legend.direction = "horizontal", legend.position = "bottom",
+        legend.title = element_blank())
+
+#RC 1 & 3
+reg13 = ggbiplot(prc.c, choices = c(1,3),
+                 obs.scale = 1, var.scale = 1,
+                 ellipse = TRUE, circle = TRUE,
+                 varname.size = 4,
+                 groups=cores$region,
+                 alpha=0.5) +
+  scale_color_viridis(discrete=TRUE) +
+  scale_x_continuous(name = "PC1 (25.4% explained var.)") +
+  scale_y_continuous(name="PC3 (13.2% explained var.)") +
+  ggtitle(label="PCA of core tools data by East African Region") +
+  theme_minimal() + 
+  theme(legend.direction = "horizontal", legend.position = "bottom",
+        legend.title = element_blank())
+
+#Plot all 2D in grid
+require(cowplot)
+cmisxreg <- plot_grid(mis12, mis13, reg12, reg13); cmisxreg
+
+#################################################################################################################
+#Project European dataset onto PCA***********
+cout = subset(cout, select=c(site, unit, id, RM2, 
+                             weightt, orient2, 
+                             epa, platfacets, scardir, totscart,
+                             elongt, flatstnt, 
+                             scarelong, cort))
+ceu = subset(cout, select=-c(site, unit, id, RM2))
+ceu = as.matrix(ceu)
+rownames(ceu)<- c()
+str(ceu)
+
+##scale the values for Euro in relation to the PCA's center, le
+ceu.sc = scale(ceu, prc.c$center) #prc.c$scale
+#Apply Varimax rotated loadings (via inverse varimax loadings) of the PCA matrix to new sample
+invLoadings <- t(pracma::pinv(vmxload.robc))
+ceu.pred = ceu.sc %*% invLoadings #%>% subset(select=c(PC1, PC2, PC3)) #if not varimax ceu.pred = t(prc.c$rotation) %*% ceu.sc
+colnames(ceu.pred) = c("RC1", "RC2", "RC3")
+#ceu.pred = as.data.frame(ceu.pred)
+
+#Combine projected Euro values with rest of PCA matrix
+prc.cproj <- prc.c
+prc.cproj$x <- rbind(prc.cproj$x, ceu.pred)
+#Create grouping vector
+grp = as.data.frame(cores$region) %>% dplyr::rename("region"="cores$region")
+x = factor(rep("Euro_OutGrp", times=68)) %>% as.data.frame() %>% dplyr::rename("region"=".")
+grp = rbind(grp, x); rm(x)
+
+#################################################################################################################
+#Replot with outgroup
+ggbiplot(prc.cproj, choices = c(1,2),
+         obs.scale = 1, var.scale = 1,
+         ellipse = TRUE, circle = TRUE,
+         varname.size = 4,
+         groups=grp$region,
+         alpha=0.5) + #help with overplotting
+  scale_color_viridis(discrete=TRUE) +
+  scale_x_continuous(name = "PC1 (25.4% explained var.)") +
+  scale_y_continuous(name="PC2 (17.6% explained var.)") +
+  ggtitle(label="PCA of core tools by East African Region and European Out group", size=10) +
+  theme_minimal() + 
+  theme(legend.direction = "horizontal", legend.position = "bottom",
+        legend.title = element_blank())
+
+ggbiplot(prc.cproj, choices = c(1,3),
+         obs.scale = 1, var.scale = 1,
+         ellipse = TRUE, circle = TRUE,
+         varname.size = 4,
+         groups=grp$region,
+         alpha=0.5) + #help with overplotting
+  scale_color_viridis(discrete=TRUE) +
+  scale_x_continuous(name = "PC1 (25.4% explained var.)") +
+  scale_y_continuous(name="PC3 (13.2% explained var.)") +
+  ggtitle(label="PCA of core tools by East African Region and European Out group") +
+  theme_minimal() + 
+  theme(legend.direction = "horizontal", legend.position = "bottom",
+        legend.title = element_blank())
+
