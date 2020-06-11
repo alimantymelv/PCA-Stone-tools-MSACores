@@ -1,3 +1,5 @@
-#This data is avaliable for use with my East_Africa_Stone_Tool_PCA gist
+#Sample code and data from my PhD research on human evolution and behavioral change, looking specifically at variaiblity and change in human technology.
 
-It contains data collected from Museums in Kenya and Ethiopia on a subgroup of stone tools, called cores, dating to the Middle and Late Pleistocene (~ 300 ka to ~ 50 ka). Attributes include shape indices,  technological attributes about how the core was made, and contextual/grouping data.
+The data is a subset of my East Africa Middle Stone Age (MSA) tool dataset and was collected during Museum research in Kenya and Ethiopia on a subgroup of stone tools, called cores, dating to the Middle and Late Pleistocene (~ 300 ka to ~ 50 ka). Attributes include shape indices,  technological attributes about how the core was made, and contextual/grouping data.
+
+Unlike other regions of Africa, stone tool variailbity in the MSA is not strongly spatially and temporally structured as evident from the PCA plots (although there are subtle patterns in across different aspects of technology). Technological variability is spatially and temporally complex and influenced by multiple contextual factors. My wider PhD research indicates early modern humans had highly flexibile technologies at their disposal and the lack of strong spatial patterning has implications for moels of population dispersals and connectivity.
